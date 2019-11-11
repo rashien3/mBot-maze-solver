@@ -1,230 +1,280 @@
 #include <MeMCore.h>
-#include <PID_v1.h>
-MeBuzzer buzzer;
-
-#define NOTE_E5  659
-#define NOTE_F5  698
-#define NOTE_FS5 740
-#define NOTE_G5  784
-#define NOTE_GS5 831
-#define NOTE_A5  880
-#define NOTE_AS5 932
-#define NOTE_B5  988
-#define NOTE_C6  1047
-#define NOTE_CS6 1109
-#define NOTE_D6  1175
-#define NOTE_DS6 1245
-#define NOTE_E6  1319
 
 #define LIGHT_SENSOR A6
-#define MICROPHONE A0
 #define LEFT_IR A2
 #define RIGHT_IR A3
+#define ULTRASONIC 12
+#define LOW_PIN A1
+#define HIGH_PIN A0
 
-// takes care of the PID
-double SetpointLeft, InputLeft, OutputLeft;
-double SetpointRight, InputRight, OutputRight;
+#define TIMEOUT 15000
 
-// initialize PID objects
-PID leftPID(&InputLeft, &OutputLeft, &SetpointLeft,0.5,0.2,0, DIRECT);
-PID rightPID(&InputRight, &OutputRight, &SetpointRight,0.5,0.2,0, DIRECT);
+#define MIN_DISTANCE 750
+#define MAX_SPEED 150
+#define FULL_LEFT 475
+#define FULL_RIGHT 475
+#define UTURN 950
+#define ONE_CELL 1020
+#define AVOID_WALL 40
 
-// Initialize both motors
-MeDCMotor motor1(M1);
-MeDCMotor motor2(M2);
+#define MAX 255
+#define DELAY_TIME 500
+#define NUM_READINGS 3
+
 
 // Initialize sensors
 MeLightSensor lightSensor(PORT_6);
-MeLineFollower lineFinder(2);
+MeRGBLed led(0,30);
 
-// Movement constants
-uint8_t motorOneSpeed = 225; // Left
-uint8_t motorTwoSpeed = 225; // Right
-
-// function detects the amount of light on sensor
-// then it proceeeds to solve the challenges based on the amount of light
-void light_challenge(){
- float voltage_lux = 0;
- // takes average amount of light
- for (int i = 0; i < 5; i++) {
-    voltage_lux += (analogRead(LIGHT_SENSOR)/1023.0)*5;
- }
- voltage_lux /= 5;
-
- if ((0.0 <= voltage_lux) && (voltage_lux < 1.3)){
-    motor1.stop();
-    motor2.stop();
-    sound_challenge();
- }
- else if((1.3 <= voltage_lux) && (voltage_lux < 2.5)){
-    motor1.stop();
-    motor2.stop();
-    delay(500);
-    TurnRight();
- }
- else if((2.5<= voltage_lux)&&(voltage_lux < 3.6)){
-    motor1.stop();
-    motor2.stop();
-    delay(500);
-    TurnLeft();
- }
- else if(voltage_lux >= 3.6){
-    motor1.stop();
-    motor2.stop();
-    delay(500);
-    motor1.run(motorOneSpeed);
-    motor2.run(-motorTwoSpeed);
- }
-}
-
-// function detects the intensity of the sound on mic
-// it then proceeds to solve challenges based on sound intensity
-void sound_challenge() {
- float micVoltage = 0;
- // takes average reading of intensity of sound
- for (int i = 0; i < 5; i++) {
-    micVoltage += (analogRead(MICROPHONE)/1023.0 ) * 5.0;
- }
- micVoltage /= 5;
-
- if ( micVoltage < 0.90){
-    motor1.stop();
-    motor2.stop();
-    victory_tune();
- } else  if ((0.90 <= micVoltage) && (micVoltage <= 2.7)){
-    motor1.stop();
-    motor2.stop();
-    delay(500);
-    TurnRight();
- } else if (micVoltage > 2.7 ){
-    motor1.stop();
-    motor2.stop();
-    delay(500);
-    TurnLeft(); 
- }
-}
-
-void victory_tune(){
- int melody[] = {
-    NOTE_C6, NOTE_C6, NOTE_C6,
-    NOTE_C6,
-    NOTE_GS5, NOTE_AS5,
-    NOTE_C6,   0,   NOTE_AS5,
-    NOTE_C6,
-    0,
- };
- int noteDurations[] = {
-    12, 12, 12,
-    4,
-    4, 4,
-    12, 12, 12,
-    1,
-    2,
- };
- for (int thisNote = 0; thisNote < 11; thisNote++) {
-    
-// to calculate the note duration, take one second
-    // divided by the note type.
-    // e.g. quarter note = 1000 / 4, eighth note = 1000/8, etc. (Assuming 1 beat per sec)
-    
-    int noteDuration = 1000/noteDurations[thisNote];
-    buzzer.tone(8, melody[thisNote],noteDuration);
-    
-// to distinguish the notes, set a minimum time between them.
-    // the note's duration + 30% seems to work well:
-    int pauseBetweenNotes = noteDuration * 1.30;
-    delay(pauseBetweenNotes);
-    
-// stop the tone playing:
-    buzzer.noTone(8);
- }
-}
+// Initialize both motors
+MeDCMotor motor1(M1); //Right forwards
+MeDCMotor motor2(M2); //Left backwards
+MeBuzzer buzzer;
+MeLineFollower lineFinder(PORT_2);
 
 
-// moves the mBot forward
-void moveForward(){
- motor1.run(motorOneSpeed);
- motor2.run(-motorTwoSpeed);
-}
-
-// turns the mBot left
-void TurnLeft(){
- motor1.run(motorOneSpeed);
- motor2.run(motorTwoSpeed);
- delay(675);
- motor1.stop();
- motor2.stop();
- motor1.run(motorOneSpeed);
- motor2.run(-motorTwoSpeed);
-}
-
-// turns the mBot right
-void TurnRight(){
- motor1.run(-motorOneSpeed);
- motor2.run(-motorTwoSpeed);
- delay(620);
- motor1.stop();
- motor2.stop();
- motor1.run(motorOneSpeed);
- motor2.run(-motorTwoSpeed);
-}
-
-// Detects a black line
-// returns 1 if there is black line or 0 if there is no black line
-int is_black_line(){
- int sensorState = lineFinder.readSensors();
- if (sensorState == S1_IN_S2_IN ||sensorState == S1_IN_S2_OUT||sensorState == S1_OUT_S2_IN){
-    return 1;
- } 
- else{
-    return 0;
- }
-}
+int colorArr[3] = {0};
+double inputLeft, inputRight;
+int sensorState;
 
 void setup() {
- Serial.begin(9600);
- pinMode(A6, INPUT); // Light
- pinMode(A1, INPUT); // Sound
-
- double sum_left = 0, sum_right = 0;
- int i;
- // Calibrates the initial left and right distance of the mBot
- for (i = 0; i < 10; i++) {
-    InputRight = analogRead(RIGHT_IR);
-    InputLeft = analogRead(LEFT_IR);
-    sum_left += InputLeft;
-    sum_right += InputRight;
-    delay(100);
- }
- SetpointLeft = sum_left/10;
- SetpointRight = sum_right/10;
- // turn PID on
- leftPID.SetMode(AUTOMATIC);
- rightPID.SetMode(AUTOMATIC);
+  Serial.begin(9600);
+  led.setpin(13);
+  
+  led.setColorAt(0,0,0,0);
+  led.setColorAt(1,0,0,0);
+  led.show();                                                                                                     
 }
 
 void loop() {
- 
- Serial.println((analogRead(A6)/1023.0)*5.0);
- // take data from IR sensor
- InputRight = analogRead(RIGHT_IR);
- InputLeft = analogRead(LEFT_IR);
- // run PID
- leftPID.Compute();
- rightPID.Compute();
- // Detects for a black line
- if (is_black_line() == 1) {
+  delay(40);
+  inputLeft = analogRead(LEFT_IR);
+  inputRight = analogRead(RIGHT_IR); 
+  //
+  sensorState = lineFinder.readSensors();
+  if (sensorState != S1_OUT_S2_OUT){
     motor1.stop();
     motor2.stop();
-    delay(1000);
-    light_challenge();
-    delay(300);
- }
- // adjust motor speed based on PID
- motorOneSpeed = (OutputRight/2.2)+150;
- motorTwoSpeed = (OutputLeft/2.2)+150;
- motor1.run(motorOneSpeed);
- motor2.run(-motorTwoSpeed);
+    moveBackward(30);
+    colorChallenge();
+  }
+  
+  if( ultrasonic() <= 8){
+    if(inputLeft < inputRight){
+      turnRight(UTURN);
+    } else if(inputRight <= inputLeft){
+      turnLeft(UTURN);
+    }
+  }
+  if(inputRight <= 700 && inputRight > 150){
+    turnLeft(AVOID_WALL);    
+  }else if(inputLeft <= 700 && inputLeft > 150){
+    turnRight(AVOID_WALL);
+  }else{
+    moveForward();
+  }
+}
+// moves the mBot forward
+void moveForward(){
+ motor1.run(MAX_SPEED);
+ motor2.run(-MAX_SPEED);
+}
+// moves mBot forward for time t
+void moveForward(int t){
+  motor1.run(MAX_SPEED);
+  motor2.run(-MAX_SPEED);
+  delay(t);
+  motor1.stop();
+  motor2.stop();
+}
+// moves the mBot backward
+void moveBackward(int t){
+ motor1.run(-MAX_SPEED);
+ motor2.run(MAX_SPEED);
+ delay(t);
+  motor1.stop();
+  motor2.stop();
+}
+// turns the mBot left
+void turnLeft(int t){
+ motor1.run(MAX_SPEED);
+ motor2.run(MAX_SPEED);
+ delay(t);
+ motor1.stop();
+ motor2.stop();
+}
+// turns the mBot right
+void turnRight(int t){
+ motor1.run(-MAX_SPEED);
+ motor2.run(-MAX_SPEED);
+ delay(t);
+ motor1.stop();
+ motor2.stop();
+}
+//returns distance in cm
+long ultrasonic() {
+  pinMode(ULTRASONIC, OUTPUT);
+  digitalWrite(ULTRASONIC, LOW);
+  delayMicroseconds(2);
+  digitalWrite(ULTRASONIC, HIGH);
+  delayMicroseconds(2);
+  digitalWrite(ULTRASONIC, LOW);
+  pinMode(ULTRASONIC, INPUT);
+  // empirically derived
+  return pulseIn(ULTRASONIC, HIGH, TIMEOUT)/ 2 / 28.89;  
+}
+void colorChallenge() {
+  int colorArr[3];
+  int r = colorArr[0],
+      g = colorArr[1],
+      b = colorArr[2];
+  char color;
+
+  for (int i=0; i<3; i++) colorArr[i] = 0;
+  for (int i=0; i<3; i++) {
+    led.setColor( (i==0) ? MAX : 0, (i==1) ? MAX : 0 , (i==2) ? MAX : 0);
+    led.show();
+    delay(DELAY_TIME);
+    colorArr[i] = lightSensor.read();
+  }
+  led.setColor(0,0,0);
+  led.show();
+
+  // Conditionals to determine color
+  // Return 0 for no color detected,
+  //        X for black,
+  //        R for red,
+  //        G for green,
+  //        B for blue,
+  //        Y for yellow,
+  //        P for purple.
+  //        $ for error.
+  if (b>280) {
+    if (g<225) color = 'P';
+    else color = 'B';
+  }
+  else if (r>390) {
+    if (g>220) color = 'Y';
+    else color = 'R';
+  }
+  else if (g>210) {
+     color = 'G';
+  }
+  else color = 'X';
+  
+  // INSTRUCTIONS FOR EACH COLOR
+  switch(color){
+    case 'R':
+      turnLeft(FULL_LEFT);
+      break;
+    case 'G':
+      turnRight(FULL_RIGHT);
+      break;
+    case 'B':
+      turnRight(FULL_RIGHT);
+      moveForward(ONE_CELL);
+      turnRight(FULL_RIGHT);
+      break;
+    case 'Y':
+      turnRight(UTURN);
+      break;
+    case 'P':
+      turnLeft(FULL_LEFT);
+      moveForward(ONE_CELL);
+      turnLeft(FULL_LEFT);
+      break;
+    case 'X':
+      soundChallenge();
+      break;
+    case '$':
+      motor1.stop();
+      motor2.stop();
+      buzzer.tone(2000, 200);
+      delay(2000);
+      break;
+  }
 }
 
 
+void soundChallenge() {
+  long lowVal, highVal = 0;
+  
+  // sample 10 times in 500ms, then take the average value
+  for(int i=0; i<10; i++){
+    lowVal += analogRead(LOW_PIN);
+    highVal += analogRead(HIGH_PIN);
+    delay(50);
+  }
+  lowVal /= 10;
+  highVal /= 10;
+  
+  if( highVal >= 100){ // for high freq
+    turnRight(FULL_RIGHT);
+  }
+  else if ( lowVal >= 500 && highVal < 100) { // for low freq
+    turnLeft(FULL_LEFT);
+  } 
+  else if (lowVal < 500 && highVal < 100) { //no sound signal detected
+    victory();
+  }
+}
+
+#define NOTE_GS4 415
+#define NOTE_DS5 622
+#define NOTE_F5 698
+#define NOTE_FS5 740
+#define NOTE_G5 784
+#define NOTE_GS5 831 
+#define NOTE_A5 880
+#define NOTE_AS5 932
+#define NOTE_B5 988
+#define NOTE_C6 1047
+#define NOTE_D6 1175
+#define NOTE_E6 1319
+
+void victory(){ // Thomas the Tank Engine Theme Song
+ int melody[] = {
+    NOTE_G5, NOTE_A5, NOTE_B5, NOTE_C6,
+    NOTE_D6, NOTE_E6,
+    NOTE_GS5, 0, 
+    NOTE_A5, NOTE_F5, NOTE_A5, NOTE_G5, 0,
+    NOTE_GS4, NOTE_A5, NOTE_F5, NOTE_F5, NOTE_A5, NOTE_G5,
+    NOTE_FS5, NOTE_G5, NOTE_FS5, NOTE_G5, NOTE_FS5,
+    NOTE_G5, NOTE_G5, 0,
+    NOTE_FS5, NOTE_G5, NOTE_FS5, NOTE_G5,
+    NOTE_GS5, NOTE_GS5,
+    0, NOTE_DS5, NOTE_DS5, NOTE_F5, NOTE_FS5,
+    NOTE_G5, NOTE_AS5,
+    NOTE_F5, NOTE_G5,
+    NOTE_GS5, 0    
+ };
+ int noteDurations[] = {// measured in semiquavers
+    4, 4, 4, 8,
+    4, 8,
+    8, 24,
+    4, 4, 4, 8, 10,
+    2, 4, 4, 4, 2, 8,
+    1, 3, 1, 3, 1,
+    8, 8, 7,
+    1, 3, 1, 4,
+    8, 8,
+    2, 2, 4, 4, 4,
+    8, 8,
+    8, 8,
+    4, 12
+    };
+ 
+ // crotchet = 190, note delay = 158ms
+ double noteDelay = 1000.0 * 60.0/190.0 / 2 /4;
+ for (int i=0; i<44; i++) {
+  int thisDuration = 158 * noteDurations[i];
+  if(melody[i] == 0)
+    delay(thisDuration);
+  else
+    buzzer.tone(8, melody[i], thisDuration);
+
+  // delay to differentiate between notes
+  delay(thisDuration);
+  buzzer.noTone(8);
+ }
+}
